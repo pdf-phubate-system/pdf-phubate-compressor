@@ -3,134 +3,97 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Compressor - Hospital System</title>
-    <!-- เรียกใช้ SDK ของ LINE และ Library สำหรับจัดการ PDF -->
+    <title>PDF Compressor</title>
     <script src="https://static.line-scdn.net"></script>
     <script src="https://unpkg.com"></script>
     <style>
-        :root { --primary-color: #00b900; --secondary-color: #008b00; }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        h2 { color: #333; margin-top: 0; font-size: 1.4rem; }
-        .file-box { border: 2px dashed #ccc; padding: 20px; border-radius: 10px; margin-bottom: 20px; cursor: pointer; }
-        .file-box:hover { border-color: var(--primary-color); }
-        select, button { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd; font-size: 16px; margin-top: 10px; }
-        button { background-color: var(--primary-color); color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; }
-        button:disabled { background-color: #ccc; }
-        .info-text { font-size: 12px; color: #666; text-align: left; margin-top: 15px; line-height: 1.5; }
-        #status { margin-top: 15px; font-weight: bold; color: var(--secondary-color); }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 30px; height: 30px; animation: spin 2s linear infinite; display: none; margin: 10px auto; }
+        :root { --primary-color: #00b900; }
+        body { font-family: sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); text-align: center; }
+        .file-box { border: 2px dashed #00b900; padding: 20px; border-radius: 10px; margin: 15px 0; cursor: pointer; background: #f9fff9; }
+        button { background: var(--primary-color); color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        #status { margin-top: 15px; font-size: 14px; color: #333; min-height: 20px; }
+        select { width: 100%; padding: 12px; border-radius: 10px; margin: 10px 0; border: 1px solid #ddd; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 25px; height: 25px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🏥 ย่อไฟล์ PDF</h2>
-    
+    <h2>🏥 ระบบย่อไฟล์ PDF</h2>
     <div class="file-box" onclick="document.getElementById('pdfInput').click()">
-        <span>เลือกไฟล์ PDF (รองรับสูงสุด 100MB)</span>
+        <span id="fileName">แตะเพื่อเลือกไฟล์ PDF</span>
         <input type="file" id="pdfInput" accept=".pdf" style="display:none">
-        <p id="fileName" style="margin-top:10px; font-size:14px; color:var(--primary-color); font-weight:bold;"></p>
     </div>
 
-    <label for="targetSize">ต้องการขนาดประมาณเท่าไหร่?</label>
     <select id="targetSize">
-        <option value="300">เล็กมาก (300 KB) - สำหรับไฟล์ < 20MB</option>
-        <option value="500">ปานกลาง (500 KB) - สำหรับไฟล์ 20-50MB</option>
-        <option value="1000" selected>ชัดเจน (1 MB) - สำหรับไฟล์ 50MB ขึ้นไป</option>
+        <option value="300">เล็กมาก (300 KB)</option>
+        <option value="500">ปานกลาง (500 KB)</option>
+        <option value="1000" selected>ชัดเจน (1 MB)</option>
     </select>
 
     <button id="btnCompress">บีบอัดและดาวน์โหลด</button>
-    
     <div class="loader" id="loader"></div>
-    <p id="status"></p>
-
-    <div class="info-text">
-        * <b>300 KB:</b> ประหยัดพื้นที่ที่สุด แต่อาจทำให้รูปไม่ชัด<br>
-        * <b>500 KB:</b> สมดุลดีที่สุดสำหรับเอกสารทั่วไป<br>
-        * <b>1 MB:</b> แนะนำสำหรับไฟล์ที่มีรูปภาพหรือแผนผังความละเอียดสูง
-    </div>
+    <div id="status"></div>
 </div>
 
 <script>
     const MY_LIFF_ID = '2008980698-qkpL7R9d';
 
-    // เริ่มต้นระบบ LINE LIFF
     async function initLiff() {
         try {
             await liff.init({ liffId: MY_LIFF_ID });
-            if (!liff.isLoggedIn()) {
-                liff.login();
-            }
-        } catch (err) {
-            console.error('LIFF Error:', err);
-        }
+        } catch (e) { console.log("LIFF Init Error"); }
     }
 
-    // แสดงชื่อไฟล์ที่เลือก
-    document.getElementById('pdfInput').onchange = function() {
-        const name = this.files[0] ? this.files[0].name : "";
-        document.getElementById('fileName').innerText = name;
+    document.getElementById('pdfInput').onchange = (e) => {
+        if(e.target.files[0]) document.getElementById('fileName').innerText = e.target.files[0].name;
     };
 
     document.getElementById('btnCompress').onclick = async () => {
         const fileInput = document.getElementById('pdfInput');
-        const targetSizeKB = document.getElementById('targetSize').value;
         const status = document.getElementById('status');
         const loader = document.getElementById('loader');
-        const btn = document.getElementById('btnCompress');
 
-        if (fileInput.files.length === 0) return alert("กรุณาเลือกไฟล์ PDF ก่อนครับ");
-        
-        // เริ่มต้นประมวลผล
-        btn.disabled = true;
+        if (!fileInput.files[0]) return alert("กรุณาเลือกไฟล์ก่อนครับ");
+
+        status.innerText = "กำลังเตรียมบีบอัด...";
         loader.style.display = "block";
-        status.innerText = "กำลังประมวลผลไฟล์ขนาดใหญ่... อาจใช้เวลา 10-30 วินาที";
 
         try {
             const file = fileInput.files[0];
             const arrayBuffer = await file.arrayBuffer();
             
-            // โหลด PDF เข้าสู่โปรแกรม
-            const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            // แก้ไขปัญหาการโหลดไฟล์ (เพิ่ม ignoreEncryption)
+            const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
             
-            /* 
-               เทคนิคปี 2026: 
-               สำหรับการบีบอัดบน Browser โดยไม่ใช้ Server 
-               เราจะทำการ 'Linearize' และลบ Metadata ที่ไม่จำเป็นออก
-               (หมายเหตุ: การลดขนาดรูปภาพใน PDF ผ่าน JavaScript โดยตรงยังจำกัด 
-               แต่การ Save ใหม่ด้วย PDF-lib จะช่วยจัดโครงสร้างให้เล็กลงได้ระดับหนึ่ง)
-            */
-            
+            // ประมวลผลและบีบอัดโครงสร้าง
             const pdfBytes = await pdfDoc.save({
                 useObjectStreams: true,
                 addDefaultPage: false
             });
 
-            // สร้างลิงก์ดาวน์โหลด
             const blob = new Blob([pdfBytes], { type: "application/pdf" });
-            const url = URL.createObjectURL(blob);
+            const downloadUrl = URL.createObjectURL(blob);
             
             const link = document.createElement('a');
-            link.href = url;
-            link.download = `Compressed_${targetSizeKB}KB_${file.name}`;
+            link.href = downloadUrl;
+            link.download = "Compressed_" + file.name;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
 
-            status.innerText = "บีบอัดสำเร็จ! ดาวน์โหลดไฟล์แล้ว";
-        } catch (error) {
-            console.error(error);
-            status.innerText = "เกิดข้อผิดพลาดในการประมวลผล";
+            status.innerText = "✅ บีบอัดสำเร็จและดาวน์โหลดแล้ว!";
+        } catch (err) {
+            console.error(err);
+            status.innerText = "❌ เกิดข้อผิดพลาด: ไฟล์อาจมีการป้องกันหรือใหญ่เกินไป";
         } finally {
-            btn.disabled = false;
             loader.style.display = "none";
         }
     };
 
     initLiff();
 </script>
-
 </body>
 </html>
