@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Compressor</title>
+    <title>PDF Compressor (Image Mode)</title>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <style>
         :root { --primary-color: #00b900; }
@@ -12,7 +13,8 @@
         .container { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); text-align: center; }
         .file-box { border: 2px dashed #00b900; padding: 20px; border-radius: 10px; margin: 15px 0; cursor: pointer; background: #f9fff9; }
         button { background: var(--primary-color); color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        #status { margin-top: 15px; font-size: 14px; color: #333; min-height: 20px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #status { margin-top: 15px; font-size: 14px; color: #333; min-height: 20px; word-break: break-all; }
         select { width: 100%; padding: 12px; border-radius: 10px; margin: 10px 0; border: 1px solid #ddd; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 25px; height: 25px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -22,15 +24,17 @@
 
 <div class="container">
     <h2>🏥 ระบบย่อไฟล์ PDF</h2>
+    <p style="font-size: 12px; color: #666;">(บีบอัดโดยการแปลงเป็นรูปภาพคุณภาพสูง)</p>
     <div class="file-box" onclick="document.getElementById('pdfInput').click()">
         <span id="fileName">แตะเพื่อเลือกไฟล์ PDF</span>
         <input type="file" id="pdfInput" accept=".pdf" style="display:none">
     </div>
 
-    <select id="targetSize">
-        <option value="300">เล็กมาก (300 KB)</option>
-        <option value="500">ปานกลาง (500 KB)</option>
-        <option value="1000" selected>ชัดเจน (1 MB)</option>
+    <label>ระดับคุณภาพ (ยิ่งน้อยไฟล์ยิ่งเล็ก):</label>
+    <select id="compressionQuality">
+        <option value="0.3">เล็กมาก (คุณภาพ 30%)</option>
+        <option value="0.5" selected>ปานกลาง (คุณภาพ 50%)</option>
+        <option value="0.7">ชัดเจน (คุณภาพ 70%)</option>
     </select>
 
     <button id="btnCompress">บีบอัดและดาวน์โหลด</button>
@@ -39,13 +43,7 @@
 </div>
 
 <script>
-    const MY_LIFF_ID = '2008980698-qkpL7R9d';
-
-    async function initLiff() {
-        try {
-            await liff.init({ liffId: MY_LIFF_ID });
-        } catch (e) { console.log("LIFF Init Error"); }
-    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
     document.getElementById('pdfInput').onchange = (e) => {
         if(e.target.files[0]) document.getElementById('fileName').innerText = e.target.files[0].name;
@@ -55,46 +53,66 @@
         const fileInput = document.getElementById('pdfInput');
         const status = document.getElementById('status');
         const loader = document.getElementById('loader');
+        const quality = parseFloat(document.getElementById('compressionQuality').value);
 
         if (!fileInput.files[0]) return alert("กรุณาเลือกไฟล์ก่อนครับ");
 
-        status.innerText = "กำลังเตรียมบีบอัด...";
+        status.innerText = "กำลังประมวลผล... (อาจใช้เวลาสักครู่)";
         loader.style.display = "block";
+        document.getElementById('btnCompress').disabled = true;
 
         try {
             const file = fileInput.files[0];
             const arrayBuffer = await file.arrayBuffer();
             
-            // แก้ไขปัญหาการโหลดไฟล์ (เพิ่ม ignoreEncryption)
-            const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+            // 1. โหลด PDF เดิม
+            const loadingTask = pdfjsLib.getDocument({data: arrayBuffer});
+            const pdf = await loadingTask.promise;
             
-            // ประมวลผลและบีบอัดโครงสร้าง
-            const pdfBytes = await pdfDoc.save({
-                useObjectStreams: true,
-                addDefaultPage: false
-            });
+            // 2. สร้าง PDF ใหม่ (ผลลัพธ์)
+            const newPdfDoc = await PDFLib.PDFDocument.create();
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                status.innerText = `กำลังบีบอัดหน้าหน้า ${i} จาก ${pdf.numPages}...`;
+                
+                const page = await pdf.getPage(i);
+                const viewport = page.getViewport({ scale: 1.5 }); // ปรับ scale เพื่อความชัด
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
 
+                await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+                // 3. บีบอัดภาพหน้าเป็น JPEG ตามคุณภาพที่เลือก
+                const imageData = canvas.toDataURL('image/jpeg', quality);
+                const imageBytes = await fetch(imageData).then(res => res.arrayBuffer());
+                
+                const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
+                const { width, height } = embeddedImage.scale(1);
+                const newPage = newPdfDoc.addPage([width, height]);
+                newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
+            }
+
+            const pdfBytes = await newPdfDoc.save();
             const blob = new Blob([pdfBytes], { type: "application/pdf" });
             const downloadUrl = URL.createObjectURL(blob);
             
             const link = document.createElement('a');
             link.href = downloadUrl;
             link.download = "Compressed_" + file.name;
-            document.body.appendChild(link);
             link.click();
-            document.body.removeChild(link);
 
-            status.innerText = "✅ บีบอัดสำเร็จและดาวน์โหลดแล้ว!";
+            status.innerText = "✅ บีบอัดสำเร็จ!";
         } catch (err) {
             console.error(err);
-            status.innerText = "❌ เกิดข้อผิดพลาด: ไฟล์อาจมีการป้องกันหรือใหญ่เกินไป";
+            status.innerText = "❌ ข้อผิดพลาด: " + err.message;
         } finally {
             loader.style.display = "none";
+            document.getElementById('btnCompress').disabled = false;
         }
     };
-
-    initLiff();
 </script>
 </body>
 </html>
-
