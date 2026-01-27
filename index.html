@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Compressor (Image Mode)</title>
+    <title>PDF Compressor (LIFF Secure Mode)</title>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -24,7 +24,8 @@
 
 <div class="container">
     <h2>🏥 ระบบย่อไฟล์ PDF</h2>
-    <p style="font-size: 12px; color: #666;">(บีบอัดโดยการแปลงเป็นรูปภาพคุณภาพสูง)</p>
+    <p style="font-size: 12px; color: #666;">(Secure LIFF Mode)</p>
+    
     <div class="file-box" onclick="document.getElementById('pdfInput').click()">
         <span id="fileName">แตะเพื่อเลือกไฟล์ PDF</span>
         <input type="file" id="pdfInput" accept=".pdf" style="display:none">
@@ -37,13 +38,42 @@
         <option value="0.7">ชัดเจน (คุณภาพ 70%)</option>
     </select>
 
-    <button id="btnCompress">บีบอัดและดาวน์โหลด</button>
+    <button id="btnCompress" disabled>รอโหลดระบบ LIFF...</button>
     <div class="loader" id="loader"></div>
     <div id="status"></div>
 </div>
 
 <script>
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyyFTkU8GcyrbW22OwGwmBdKtW3cH7s7Vy_YnkVFa3xRz1MpbJ3KXmp34NWSIzj4PaWVQ/exec";
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+    // 1. ฟังก์ชันเริ่มต้นโหลด LIFF ID จาก GAS
+    async function initSystem() {
+        const status = document.getElementById('status');
+        try {
+            status.innerText = "กำลังเชื่อมต่อความปลอดภัย...";
+            const response = await fetch(`${GAS_URL}?action=getLiffId`);
+            const data = await response.json();
+            
+            if (data.liffId) {
+                await liff.init({ liffId: data.liffId });
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                } else {
+                    document.getElementById('btnCompress').disabled = false;
+                    document.getElementById('btnCompress').innerText = "บีบอัดและดาวน์โหลด";
+                    status.innerText = "ระบบพร้อมใช้งาน (LIFF Mode)";
+                }
+            } else {
+                throw new Error("ไม่พบ LIFF ID ในระบบ");
+            }
+        } catch (err) {
+            status.innerText = "❌ เกิดข้อผิดพลาดในการโหลดระบบ: " + err.message;
+        }
+    }
+
+    // เรียกทำงานเมื่อเปิดหน้าเว็บ
+    initSystem();
 
     document.getElementById('pdfInput').onchange = (e) => {
         if(e.target.files[0]) document.getElementById('fileName').innerText = e.target.files[0].name;
@@ -57,27 +87,21 @@
 
         if (!fileInput.files[0]) return alert("กรุณาเลือกไฟล์ก่อนครับ");
 
-        status.innerText = "กำลังประมวลผล... (อาจใช้เวลาสักครู่)";
+        status.innerText = "กำลังประมวลผล... (ห้ามปิดหน้าจอ)";
         loader.style.display = "block";
         document.getElementById('btnCompress').disabled = true;
 
         try {
             const file = fileInput.files[0];
             const arrayBuffer = await file.arrayBuffer();
-            
-            // 1. โหลด PDF เดิม
             const loadingTask = pdfjsLib.getDocument({data: arrayBuffer});
             const pdf = await loadingTask.promise;
-            
-            // 2. สร้าง PDF ใหม่ (ผลลัพธ์)
             const newPdfDoc = await PDFLib.PDFDocument.create();
             
             for (let i = 1; i <= pdf.numPages; i++) {
                 status.innerText = `กำลังบีบอัดหน้าหน้า ${i} จาก ${pdf.numPages}...`;
-                
                 const page = await pdf.getPage(i);
-                const viewport = page.getViewport({ scale: 1.5 }); // ปรับ scale เพื่อความชัด
-                
+                const viewport = page.getViewport({ scale: 1.5 });
                 const canvas = document.createElement('canvas');
                 const context = canvas.getContext('2d');
                 canvas.height = viewport.height;
@@ -85,7 +109,6 @@
 
                 await page.render({ canvasContext: context, viewport: viewport }).promise;
 
-                // 3. บีบอัดภาพหน้าเป็น JPEG ตามคุณภาพที่เลือก
                 const imageData = canvas.toDataURL('image/jpeg', quality);
                 const imageBytes = await fetch(imageData).then(res => res.arrayBuffer());
                 
