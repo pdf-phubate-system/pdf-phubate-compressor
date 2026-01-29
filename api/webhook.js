@@ -20,28 +20,29 @@ module.exports = async (req, res) => {
           { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` } }
         ).catch(() => {});
 
-        // 2. ดึงไฟล์
+        // 2. ดึงไฟล์ (เหมือนเดิม)
         const response = await axios.get(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
           headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` },
           responseType: 'arraybuffer' 
         });
 
-        // 3. บีบอัดระดับโครงสร้าง (Structure Compression)
+        // 3. บีบอัดระดับโครงสร้างขั้นสูง (ส่วนที่ปรับปรุงใหม่)
         const pdfDoc = await PDFDocument.load(response.data);
-        
-        // ล้าง Metadata ที่ไม่จำเป็นออกเพื่อลดขนาด
-        pdfDoc.setTitle('');
-        pdfDoc.setAuthor('');
-        pdfDoc.setSubject('');
-        pdfDoc.setCreator('');
-        
-        // เซฟแบบบีบอัด Object Streams (หัวใจสำคัญของการลดขนาดแบบไม่ต้องใช้ Canvas)
-        const compressedBytes = await pdfDoc.save({ 
-          useObjectStreams: true, // รวม Object เล็กๆ เข้าด้วยกันเพื่อลดขนาด
-          addDefaultMetadata: false // ตัด Metadata พื้นฐานออก
+
+        // เทคนิค: Copy เฉพาะหน้าออกมาสร้างไฟล์ใหม่ 
+        // วิธีนี้จะช่วยล้างพวก Metadata หนาๆ หรือ Objects ที่ตกค้างในไฟล์เดิมออกไปได้ดีมาก
+        const compressedPdfDoc = await PDFDocument.create();
+        const pages = await compressedPdfDoc.copyPages(pdfDoc, pdfDoc.getPageIndices());
+        pages.forEach((page) => compressedPdfDoc.addPage(page));
+
+        // เซฟแบบเน้นบีบอัดสูงสุดเท่าที่เทคนิคแบบ Non-Canvasจะทำได้
+        const compressedBytes = await compressedPdfDoc.save({ 
+          useObjectStreams: true,       // บีบอัดกลุ่มข้อมูล Object
+          addDefaultMetadata: false,    // ไม่ใส่ Metadata พื้นฐานเพิ่ม
+          updateFieldAppearances: false // ไม่ต้องสร้างหน้าตาฟอร์มใหม่
         });
 
-        // 4. Upload ไป Vercel Blob
+        // 4. Upload ไป Vercel Blob (เหมือนเดิม)
         const blob = await put(`comp_${Date.now()}.pdf`, Buffer.from(compressedBytes), {
           access: 'public',
           contentType: 'application/pdf',
