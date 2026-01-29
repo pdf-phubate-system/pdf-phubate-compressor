@@ -1,8 +1,10 @@
 {
   "dependencies": {
-    "@line/bot-sdk": "^7.5.0",
+    "@line/bot-sdk": "^9.4.1",
     "pdf-lib": "^1.17.1",
-    "@vercel/blob": "^0.22.1",
-    "axios": "^1.6.0"
+    "@vercel/blob": "^0.23.4",
+    "axios": "^1.6.8",
+    "pdfjs-dist": "2.16.105",
+    "canvas": "^2.11.2"
   }
 }
