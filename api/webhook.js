@@ -20,7 +20,6 @@ module.exports = async (req, res) => {
       const messageId = event.message.id;
       const originalFileName = event.message.fileName;
 
-      // ตรวจสอบว่าเป็น PDF หรือไม่
       if (!originalFileName.toLowerCase().endsWith('.pdf')) {
         await client.replyMessage(event.replyToken, { type: 'text', text: 'กรุณาส่งไฟล์ PDF เท่านั้นครับ' });
         continue;
@@ -32,48 +31,48 @@ module.exports = async (req, res) => {
           headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` },
           responseType: 'arraybuffer' 
         });
-        const pdfBuffer = response.data;
 
         // 2. บีบอัดไฟล์ PDF
-        const pdfDoc = await PDFDocument.load(pdfBuffer);
+        const pdfDoc = await PDFDocument.load(response.data);
         const compressedPdfBytes = await pdfDoc.save({ 
           useObjectStreams: true,
-          addDefaultMetadata: false 
+          addDefaultMetadata: false
         });
 
-        // 3. Upload ไป Vercel Blob (ใช้ชื่อไฟล์ภาษาอังกฤษเพื่อความปลอดภัยของ URL)
-        const safeFileName = `compressed_${messageId}.pdf`;
-        const blob = await put(safeFileName, Buffer.from(compressedPdfBytes), {
+        // 3. Upload ไป Vercel Blob (ใช้ชื่อไฟล์ภาษาอังกฤษเพื่อความปลอดภัย)
+        const blob = await put(`pdf_${messageId}.pdf`, Buffer.from(compressedPdfBytes), {
           access: 'public',
           contentType: 'application/pdf',
           addRandomSuffix: false
         });
 
-        // 4. ตอบกลับด้วย Array (ส่งข้อความพร้อมไฟล์)
-        // หมายเหตุ: fileName ในส่วนนี้ LINE อนุญาตให้เป็นภาษาไทยได้ แต่แนะนำให้ตัดคำนำหน้าออกสั้นๆ
+        // 4. ตอบกลับด้วย Template (เสถียรกว่าการส่งไฟล์ตรงๆ)
         await client.replyMessage(event.replyToken, [
-          { type: 'text', text: 'บีบอัดไฟล์สำเร็จแล้วครับ! กำลังส่งไฟล์ให้...' },
           {
-            type: 'file',
-            originalContentUrl: blob.url,
-            fileName: `Compressed_${originalFileName.replace(/\s+/g, '_')}`,
-            fileSize: compressedPdfBytes.length
+            type: 'template',
+            altText: 'บีบอัดไฟล์ PDF สำเร็จ!',
+            template: {
+              type: 'buttons',
+              title: 'บีบอัดสำเร็จ!',
+              text: `ไฟล์: ${originalFileName.substring(0, 40)}`,
+              actions: [
+                {
+                  type: 'uri',
+                  label: 'ดาวน์โหลดไฟล์ (PDF)',
+                  uri: blob.url
+                }
+              ]
+            }
           }
         ]);
 
-        console.log(`Success: ${blob.url}`);
-
       } catch (error) {
-        console.error("Detailed Error:", error.response ? error.response.data : error.message);
-        // พยายามแจ้งเตือนผู้ใช้หากยังใช้ replyToken ได้
-        try {
-          await client.pushMessage(event.source.userId, { 
-            type: 'text', 
-            text: `ขออภัย เกิดข้อผิดพลาด: ${error.message}` 
-          });
-        } catch (e) {
-          console.error("Could not send error message to user");
-        }
+        console.error("API Error:", error.response ? JSON.stringify(error.response.data) : error.message);
+        // แจ้งเตือนข้อผิดพลาดกลับไป
+        await client.pushMessage(event.source.userId, {
+          type: 'text',
+          text: `เกิดข้อผิดพลาด: ${error.message}`
+        }).catch(() => {});
       }
     }
   }
