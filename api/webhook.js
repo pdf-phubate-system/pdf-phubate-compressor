@@ -12,20 +12,20 @@ module.exports = async (req, res) => {
       if (!originalFileName.toLowerCase().endsWith('.pdf')) continue;
 
       try {
-        // 1. Loading
+        // 1. Start Loading Animation
         await axios.post('https://api.line.me/v2/bot/chat/loading/start', 
           { chatId: event.source.userId, loadingSeconds: 60 },
           { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` } }
         ).catch(() => {});
 
-        // 2. ดึงไฟล์จาก LINE
+        // 2. Download PDF from LINE
         const lineRes = await axios.get(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
           headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` },
           responseType: 'arraybuffer' 
         });
 
-        // 3. เริ่มกระบวนการ iLovePDF
-        // 3.1 Auth
+        // 3. iLovePDF Processing
+        // 3.1 Authenticate
         const authRes = await axios.post('https://api.ilovepdf.com/v1/auth', {
           public_key: process.env.ILOVEPDF_PUBLIC_KEY
         });
@@ -37,17 +37,14 @@ module.exports = async (req, res) => {
         });
         const { server, task } = startRes.data;
 
-        // 3.3 Upload (ปรับใหม่: ใช้ Buffer และระบุชื่อไฟล์ให้ชัดเจน)
+        // 3.3 Upload (บังคับชื่อไฟล์เป็น input.pdf เพื่อป้องกันปัญหา Encoding)
         const form = new FormData();
         form.append('task', task);
-        
-        // สำคัญ: ต้องใส่ filename ให้มีนามสกุล .pdf เสมอ
         form.append('file', Buffer.from(lineRes.data), {
-            filename: originalFileName.endsWith('.pdf') ? originalFileName : 'document.pdf',
+            filename: 'input.pdf',
             contentType: 'application/pdf',
         });
 
-        // ส่งด้วยการรอผลลัพธ์ (await) และดึง Header จาก form โดยตรง
         await axios.post(`https://${server}/v1/upload`, form, {
             headers: { 
                 'Authorization': `Bearer ${token}`,
@@ -55,34 +52,31 @@ module.exports = async (req, res) => {
             }
         });
 
-        // 3.4 Process (จุดนี้สำคัญ: บางครั้ง API ต้องการเวลาเล็กน้อยก่อนสั่ง Process)
-        // ลองใส่ Delay สั้นๆ 1 วินาที หรือยิง Process ทันทีด้วยโครงสร้างที่ถูกต้อง
-        const processPayload = {
+        // 3.4 Process (ใช้ระดับ recommended เพื่อความคมชัดที่สมดุล)
+        await axios.post(`https://${server}/v1/process`, {
             task: task,
             tool: 'compress',
             compression_level: 'recommended'
-        };
-
-        await axios.post(`https://${server}/v1/process`, processPayload, {
+        }, {
             headers: { 
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             }
         });
 
-        // 3.5 Download
+        // 3.5 Download the result
         const downloadRes = await axios.get(`https://${server}/v1/download/${task}`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-          responseType: 'arraybuffer'
+            headers: { 'Authorization': `Bearer ${token}` },
+            responseType: 'arraybuffer'
         });
 
-        // 4. ฝากไฟล์ที่ Vercel Blob
-        const blob = await put(`min_${Date.now()}.pdf`, Buffer.from(downloadRes.data), {
+        // 4. Store in Vercel Blob (ใช้ชื่อไฟล์เดิมของ User)
+        const blob = await put(originalFileName, Buffer.from(downloadRes.data), {
           access: 'public',
           contentType: 'application/pdf',
         });
 
-        // 5. ตอบกลับ
+        // 5. Reply to User
         await axios.post('https://api.line.me/v2/bot/message/reply', {
           replyToken: event.replyToken,
           messages: [{
@@ -91,9 +85,9 @@ module.exports = async (req, res) => {
             template: {
               type: 'buttons',
               thumbnailImageUrl: 'https://cdn-icons-png.flaticon.com/512/337/337946.png',
-              title: 'บีบอัดเสร็จแล้ว!',
-              text: `ไฟล์: ${originalFileName.substring(0, 30)}`,
-              actions: [{ type: 'uri', label: 'ดาวน์โหลด (เล็กลงมาก)', uri: blob.url }]
+              title: 'บีบอัดสำเร็จ!',
+              text: `ลดขนาดไฟล์เรียบร้อยแล้วครับ`,
+              actions: [{ type: 'uri', label: 'ดาวน์โหลดไฟล์ (PDF)', uri: blob.url }]
             }
           }]
         }, {
@@ -101,7 +95,20 @@ module.exports = async (req, res) => {
         });
 
       } catch (error) {
-        console.error("iLovePDF Error:", error.response ? error.response.data : error.message);
+        // --- ส่วน Debugging ขั้นละเอียด ---
+        console.error("--- Error Details ---");
+        if (error.response && error.response.data) {
+          // นี่คือจุดที่คุณจะเห็นว่า iLovePDF ปฏิเสธเพราะอะไรใน Vercel Logs
+          console.error(JSON.stringify(error.response.data, null, 2));
+        } else {
+          console.error(error.message);
+        }
+
+        // แจ้งเตือน User เล็กน้อย
+        await axios.post('https://api.line.me/v2/bot/message/reply', {
+          replyToken: event.replyToken,
+          messages: [{ type: 'text', text: 'เกิดข้อผิดพลาดในการบีบอัด กรุณาลองใหม่อีกครั้งครับ' }]
+        }, { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` } }).catch(() => {});
       }
     }
   }
