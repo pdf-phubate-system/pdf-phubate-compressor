@@ -37,29 +37,38 @@ module.exports = async (req, res) => {
         });
         const { server, task } = startRes.data;
 
-        // 3.3 Upload (ปรับปรุงใหม่ให้ระบุไฟล์ละเอียดขึ้น)
+        // 3.3 Upload (ปรับใหม่: ใช้ Buffer และระบุชื่อไฟล์ให้ชัดเจน)
         const form = new FormData();
         form.append('task', task);
         
-        // ระบุ filename และ contentType เพื่อให้ iLovePDF รู้ว่าเป็น PDF แน่นอน
+        // สำคัญ: ต้องใส่ filename ให้มีนามสกุล .pdf เสมอ
         form.append('file', Buffer.from(lineRes.data), {
-          filename: originalFileName || 'document.pdf',
-          contentType: 'application/pdf',
+            filename: originalFileName.endsWith('.pdf') ? originalFileName : 'document.pdf',
+            contentType: 'application/pdf',
         });
 
+        // ส่งด้วยการรอผลลัพธ์ (await) และดึง Header จาก form โดยตรง
         await axios.post(`https://${server}/v1/upload`, form, {
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            ...form.getHeaders() // ดึง Header ที่ถูกต้องของ FormData มาใช้
-          }
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                ...form.getHeaders() 
+            }
         });
 
-        // 3.4 Process (แนะนำให้ใช้ recommended เพื่อความปลอดภัย)
-        await axios.post(`https://${server}/v1/process`, {
-          task,
-          tool: 'compress',
-          compression_level: 'recommended' 
-        }, { headers: { 'Authorization': `Bearer ${token}` } });
+        // 3.4 Process (จุดนี้สำคัญ: บางครั้ง API ต้องการเวลาเล็กน้อยก่อนสั่ง Process)
+        // ลองใส่ Delay สั้นๆ 1 วินาที หรือยิง Process ทันทีด้วยโครงสร้างที่ถูกต้อง
+        const processPayload = {
+            task: task,
+            tool: 'compress',
+            compression_level: 'recommended'
+        };
+
+        await axios.post(`https://${server}/v1/process`, processPayload, {
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
 
         // 3.5 Download
         const downloadRes = await axios.get(`https://${server}/v1/download/${task}`, {
