@@ -37,23 +37,28 @@ module.exports = async (req, res) => {
         });
         const { server, task } = startRes.data;
 
-        // 3.3 Upload
+        // 3.3 Upload (ปรับปรุงใหม่ให้ระบุไฟล์ละเอียดขึ้น)
         const form = new FormData();
         form.append('task', task);
-        form.append('file', Buffer.from(lineRes.data), { filename: originalFileName });
+        
+        // ระบุ filename และ contentType เพื่อให้ iLovePDF รู้ว่าเป็น PDF แน่นอน
+        form.append('file', Buffer.from(lineRes.data), {
+          filename: originalFileName || 'document.pdf',
+          contentType: 'application/pdf',
+        });
 
         await axios.post(`https://${server}/v1/upload`, form, {
           headers: { 
             'Authorization': `Bearer ${token}`,
-            ...form.getHeaders()
+            ...form.getHeaders() // ดึง Header ที่ถูกต้องของ FormData มาใช้
           }
         });
 
-        // 3.4 Process
+        // 3.4 Process (แนะนำให้ใช้ recommended เพื่อความปลอดภัย)
         await axios.post(`https://${server}/v1/process`, {
           task,
           tool: 'compress',
-          compression_level: 'extreme' // 'extreme' จะเล็กที่สุด, 'recommended' จะชัดกว่าหน่อย
+          compression_level: 'recommended' 
         }, { headers: { 'Authorization': `Bearer ${token}` } });
 
         // 3.5 Download
