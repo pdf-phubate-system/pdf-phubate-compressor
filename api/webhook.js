@@ -1,6 +1,8 @@
 const { PDFDocument } = require('pdf-lib');
 const axios = require('axios');
 const { put } = require('@vercel/blob');
+const { createCanvas, Image } = require('canvas'); // ต้องลงเพิ่ม
+const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(200).send('OK');
@@ -9,15 +11,12 @@ module.exports = async (req, res) => {
   for (let event of events) {
     if (event.type === 'message' && event.message.type === 'file') {
       const { id: messageId, fileName: originalFileName } = event.message;
-      const replyToken = event.replyToken;
-
-      // กรองเฉพาะไฟล์ PDF
       if (!originalFileName.toLowerCase().endsWith('.pdf')) continue;
 
       try {
-        // 1. แสดง Loading Animation ทันที (ยิง API ตรง)
+        // 1. แสดงสถานะกำลังคิด
         await axios.post('https://api.line.me/v2/bot/chat/loading/start', 
-          { chatId: event.source.userId, loadingSeconds: 30 },
+          { chatId: event.source.userId, loadingSeconds: 60 },
           { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` } }
         ).catch(() => {});
 
@@ -27,25 +26,56 @@ module.exports = async (req, res) => {
           responseType: 'arraybuffer' 
         });
 
-        // 3. บีบอัดไฟล์ PDF
-        const pdfDoc = await PDFDocument.load(response.data);
-        const compressedBytes = await pdfDoc.save({ useObjectStreams: true });
-        const finalBuffer = Buffer.from(compressedBytes);
+        // 3. เริ่มกระบวนการบีบอัดแบบ Re-render (เหมือนใน HTML)
+        const pdfData = new Uint8Array(response.data);
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const pdfDoc = await loadingTask.promise;
+        
+        const outPdfDoc = await PDFDocument.create();
+        
+        // วนลูปทุกหน้า
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+          const page = await pdfDoc.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 }); // เพิ่ม scale เพื่อความคมชัด
 
-        // 4. Upload ไป Vercel Blob (ใช้ชื่อสั้นๆ เพื่อให้ URL ปลอดภัย)
-        const blob = await put(`comp_${Date.now()}.pdf`, finalBuffer, {
+          const canvas = createCanvas(viewport.width, viewport.height);
+          const context = canvas.getContext('2d');
+
+          await page.render({ canvasContext: context, viewport }).promise;
+
+          // แปลงเป็น JPEG (Quality 0.5 - 0.7 คือจุดที่ชัดแต่ไฟล์เล็ก)
+          const jpegBuffer = canvas.toBuffer('image/jpeg', { quality: 0.6 });
+          const embedImg = await outPdfDoc.embedJpg(jpegBuffer);
+
+          const newPage = outPdfDoc.addPage([viewport.width, viewport.height]);
+          newPage.drawImage(embedImg, {
+            x: 0, y: 0,
+            width: viewport.width,
+            height: viewport.height,
+          });
+        }
+
+        const compressedBytes = await outPdfDoc.save();
+
+        // 4. Upload ไป Vercel Blob
+        const blob = await put(`compressed_${Date.now()}.pdf`, Buffer.from(compressedBytes), {
           access: 'public',
           contentType: 'application/pdf',
         });
 
-        // 5. ส่งไฟล์กลับแบบดิบ (Raw JSON) - ไม่ใส่ fileSize และล้างชื่อไฟล์ให้สะอาด
-        // วิธีนี้จะลดโอกาสเกิด Error 400 ได้ดีที่สุด
+        // 5. ส่งปุ่มดาวน์โหลดกลับ
         await axios.post('https://api.line.me/v2/bot/message/reply', {
-          replyToken: replyToken,
+          replyToken: event.replyToken,
           messages: [{
-            type: 'file',
-            originalContentUrl: blob.url,
-            fileName: `Compressed_${originalFileName.replace(/[^\x20-\x7E]/g, '') || 'document.pdf'}`
+            type: 'template',
+            altText: 'บีบอัดไฟล์สำเร็จ',
+            template: {
+              type: 'buttons',
+              thumbnailImageUrl: 'https://cdn-icons-png.flaticon.com/512/337/337946.png',
+              title: 'บีบอัดระดับคมชัดสำเร็จ',
+              text: `ขนาดเล็กลงอย่างเห็นได้ชัด!`,
+              actions: [{ type: 'uri', label: 'ดาวน์โหลดไฟล์', uri: blob.url }]
+            }
           }]
         }, {
           headers: { 
@@ -55,8 +85,7 @@ module.exports = async (req, res) => {
         });
 
       } catch (error) {
-        // บันทึก Log กรณีเกิดข้อผิดพลาดเพื่อดูสาเหตุที่แท้จริง
-        console.error("API Error Response:", error.response ? JSON.stringify(error.response.data) : error.message);
+        console.error("Advanced Compress Error:", error);
       }
     }
   }
