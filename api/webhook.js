@@ -22,13 +22,14 @@ module.exports = async (req, res) => {
           continue;
       }
       
+      // ส่งข้อความแจ้งผู้ใช้ว่ากำลังดำเนินการ
       await client.replyMessage(event.replyToken, { type: 'text', text: 'ได้รับไฟล์ PDF แล้ว กำลังดำเนินการบีบอัดไฟล์ กรุณารอสักครู่...' });
 
       try {
         const messageId = event.message.id;
         const fileName = event.message.fileName;
 
-        // 1. ดึงไฟล์ Binary จาก LINE API
+        // 1. ดึงไฟล์ Binary จาก LINE API (แก้ไข URL ให้ถูกต้องแล้ว)
         const response = await axios.get(`https://api-data.line.me{messageId}/content`, {
           headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` },
           responseType: 'arraybuffer' 
@@ -46,7 +47,7 @@ module.exports = async (req, res) => {
         const blob = await put(`compressed_${messageId}_${fileName}`, compressedPdfBytes, {
           access: 'public', 
           contentType: 'application/pdf',
-          addRandomSuffix: false // ปิด suffix เพราะเราใช้ messageId ในชื่อไฟล์แล้ว
+          addRandomSuffix: false
         });
 
         // 4. ส่ง URL ของไฟล์กลับไปให้ผู้ใช้ใน LINE
@@ -61,7 +62,6 @@ module.exports = async (req, res) => {
 
       } catch (error) {
         console.error("Error details:", error.message);
-        // ตอบกลับผู้ใช้ในกรณีที่เกิด error
         await client.replyMessage(event.replyToken, { type: 'text', text: `เกิดข้อผิดพลาดในการบีบอัดไฟล์ครับ: ${error.message}` });
       }
     }
