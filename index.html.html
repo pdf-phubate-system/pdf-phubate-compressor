@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Compressor</title>
+    
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/OpenToolKit/CompressPDF@master/js/pdfkit-standalone-0.10.0.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/OpenToolKit/CompressPDF@master/js/blob-stream-0.1.3.js"></script>
+
+    <style>
+        :root { --primary-color: #00b900; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; padding: 20px; display: flex; justify-content: center; }
+        .container { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
+        .file-box { border: 2px dashed #ccc; padding: 20px; border-radius: 10px; margin-bottom: 20px; cursor: pointer; }
+        select, button { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd; font-size: 16px; margin-top: 10px; }
+        button { background-color: var(--primary-color); color: white; border: none; font-weight: bold; cursor: pointer; }
+        button:disabled { background-color: #ccc; }
+        #status { margin-top: 15px; font-size: 13px; color: #666; white-space: pre-line; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🏥 ย่อไฟล์ PDF</h2>
+    <p style="font-size: 12px; color: red;">* ระบบจะถามที่บันทึกทีละไฟล์</p>
+    
+    <div class="file-box" onclick="document.getElementById('pdfInput').click()">
+        <span id="fileNameHint">เลือกไฟล์ PDF (เลือกได้หลายไฟล์)</span>
+        <input type="file" id="pdfInput" accept=".pdf" multiple style="display:none">
+    </div>
+
+    <select id="quality">
+        <option value="0.3">คุณภาพต่ำ (ไฟล์เล็กสุด)</option>
+        <option value="0.5" selected>คุณภาพปานกลาง (แนะนำ)</option>
+        <option value="0.8">คุณภาพสูง (ชัดเจน)</option>
+    </select>
+
+    <button id="btnCompress">บีบอัดและเลือกที่เซฟ</button>
+    
+    <div class="loader" id="loader"></div>
+    <p id="status"></p>
+
+    <canvas id="tempCanvas" style="display:none;"></canvas>
+</div>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    // ฟังก์ชันสำหรับ "Save As" โดยให้เลือกที่บันทึกได้
+    async function saveFileAs(blob, suggestedName) {
+        // ตรวจสอบว่า Browser รองรับ File System Access API หรือไม่ (Chrome/Edge/Desktop)
+        if ('showSaveFilePicker' in window) {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{
+                        description: 'PDF Document',
+                        accept: {'application/pdf': ['.pdf']},
+                    }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                return true;
+            } catch (err) {
+                console.log('User cancelled or error:', err);
+                return false;
+            }
+        } else {
+            // กรณี Browser ไม่รองรับ (เช่น LINE In-App หรือ Safari รุ่นเก่า) ให้โหลดแบบปกติ
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = suggestedName;
+            link.click();
+            return true;
+        }
+    }
+
+    const processSingleFile = (file, quality) => {
+        return new Promise(async (resolve, reject) => {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const doc = new PDFDocument({ autoFirstPage: false });
+                const stream = doc.pipe(blobStream());
+                const canvas = document.getElementById('tempCanvas');
+                const ctx = canvas.getContext('2d');
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+                    const imgData = canvas.toDataURL('image/jpeg', quality);
+                    doc.addPage({ size: [viewport.width, viewport.height] });
+                    doc.image(imgData, 0, 0, { width: viewport.width, height: viewport.height });
+                }
+
+                doc.end();
+                stream.on('finish', async () => {
+                    const blob = stream.toBlob('application/pdf');
+                    // เรียกใช้ฟังก์ชันเลือกที่เซฟ
+                    await saveFileAs(blob, `Small_${file.name}`);
+                    resolve();
+                });
+            } catch (err) { reject(err); }
+        });
+    };
+
+    document.getElementById('btnCompress').onclick = async () => {
+        const fileInput = document.getElementById('pdfInput');
+        const quality = parseFloat(document.getElementById('quality').value);
+        const status = document.getElementById('status');
+        const loader = document.getElementById('loader');
+        const btn = document.getElementById('btnCompress');
+
+        if (fileInput.files.length === 0) return alert("กรุณาเลือกไฟล์ก่อนครับ");
+
+        btn.disabled = true;
+        loader.style.display = "block";
+
+        try {
+            const files = Array.from(fileInput.files);
+            for (let i = 0; i < files.length; i++) {
+                status.innerText = `กำลังทำไฟล์ที่ ${i + 1} / ${files.length}\nกรุณาเลือกที่บันทึกไฟล์เมื่อหน้าต่างเด้งขึ้นมา`;
+                await processSingleFile(files[i], quality);
+            }
+            status.innerHTML = `<span style="color:var(--primary-color)">✅ เสร็จสิ้นทุกไฟล์!</span>`;
+        } catch (error) {
+            status.innerHTML = `<span style="color:red">❌ เกิดข้อผิดพลาด</span>`;
+        } finally {
+            btn.disabled = false;
+            loader.style.display = "none";
+        }
+    };
+</script>
+
+</body>
+</html>
