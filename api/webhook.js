@@ -1,7 +1,7 @@
 const line = require('@line/bot-sdk');
 const { PDFDocument } = require('pdf-lib');
 const axios = require('axios');
-const { put } = require('@vercel/blob'); // แนะนำใช้เวอร์ชันล่าสุด
+const { put } = require('@vercel/blob');
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -18,9 +18,10 @@ module.exports = async (req, res) => {
     if (event.type === 'message' && event.message.type === 'file') {
       
       const messageId = event.message.id;
-      const fileName = event.message.fileName;
+      const originalFileName = event.message.fileName;
 
-      if (!fileName.toLowerCase().endsWith('.pdf')) {
+      // ตรวจสอบว่าเป็น PDF หรือไม่
+      if (!originalFileName.toLowerCase().endsWith('.pdf')) {
         await client.replyMessage(event.replyToken, { type: 'text', text: 'กรุณาส่งไฟล์ PDF เท่านั้นครับ' });
         continue;
       }
@@ -33,30 +34,46 @@ module.exports = async (req, res) => {
         });
         const pdfBuffer = response.data;
 
-        // 2. บีบอัด (pdf-lib ทำได้จำกัด แนะนำเช็คความจุด้วย)
+        // 2. บีบอัดไฟล์ PDF
         const pdfDoc = await PDFDocument.load(pdfBuffer);
-        const compressedPdfBytes = await pdfDoc.save({ useObjectStreams: true });
-
-        // 3. Upload ไป Vercel Blob
-        const blob = await put(`compressed_${fileName}`, compressedPdfBytes, {
-          access: 'public',
-          contentType: 'application/pdf',
+        const compressedPdfBytes = await pdfDoc.save({ 
+          useObjectStreams: true,
+          addDefaultMetadata: false 
         });
 
-        // 4. ตอบกลับด้วย Array (ส่งทีเดียว 2 ข้อความ)
+        // 3. Upload ไป Vercel Blob (ใช้ชื่อไฟล์ภาษาอังกฤษเพื่อความปลอดภัยของ URL)
+        const safeFileName = `compressed_${messageId}.pdf`;
+        const blob = await put(safeFileName, Buffer.from(compressedPdfBytes), {
+          access: 'public',
+          contentType: 'application/pdf',
+          addRandomSuffix: false
+        });
+
+        // 4. ตอบกลับด้วย Array (ส่งข้อความพร้อมไฟล์)
+        // หมายเหตุ: fileName ในส่วนนี้ LINE อนุญาตให้เป็นภาษาไทยได้ แต่แนะนำให้ตัดคำนำหน้าออกสั้นๆ
         await client.replyMessage(event.replyToken, [
-          { type: 'text', text: 'บีบอัดไฟล์สำเร็จแล้วครับ!' },
+          { type: 'text', text: 'บีบอัดไฟล์สำเร็จแล้วครับ! กำลังส่งไฟล์ให้...' },
           {
             type: 'file',
             originalContentUrl: blob.url,
-            fileName: `Compressed_${fileName}`,
+            fileName: `Compressed_${originalFileName.replace(/\s+/g, '_')}`,
             fileSize: compressedPdfBytes.length
           }
         ]);
 
+        console.log(`Success: ${blob.url}`);
+
       } catch (error) {
-        console.error(error);
-        // ถ้าตอบ replyToken ไปแล้วในจุดอื่น ตรงนี้อาจต้องใช้ pushMessage แทน
+        console.error("Detailed Error:", error.response ? error.response.data : error.message);
+        // พยายามแจ้งเตือนผู้ใช้หากยังใช้ replyToken ได้
+        try {
+          await client.pushMessage(event.source.userId, { 
+            type: 'text', 
+            text: `ขออภัย เกิดข้อผิดพลาด: ${error.message}` 
+          });
+        } catch (e) {
+          console.error("Could not send error message to user");
+        }
       }
     }
   }
