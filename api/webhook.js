@@ -18,6 +18,7 @@ module.exports = async (req, res) => {
     if (event.type === 'message' && event.message.type === 'file') {
       
       const messageId = event.message.id;
+      const userId = event.source.userId;
       const originalFileName = event.message.fileName;
 
       if (!originalFileName.toLowerCase().endsWith('.pdf')) {
@@ -26,53 +27,43 @@ module.exports = async (req, res) => {
       }
 
       try {
-        // 1. ดึงไฟล์จาก LINE
+        // 1. ตอบกลับทันที (ใช้ Reply Token)
+        await client.replyMessage(event.replyToken, { 
+          type: 'text', 
+          text: `ได้รับไฟล์ "${originalFileName}" แล้วครับ กำลังบีบอัดไฟล์ให้ รอสักครู่...` 
+        });
+
+        // 2. ดึงไฟล์จาก LINE
         const response = await axios.get(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
           headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` },
           responseType: 'arraybuffer' 
         });
 
-        // 2. บีบอัดไฟล์ PDF
+        // 3. บีบอัดไฟล์ PDF
         const pdfDoc = await PDFDocument.load(response.data);
-        const compressedPdfBytes = await pdfDoc.save({ 
-          useObjectStreams: true,
-          addDefaultMetadata: false
-        });
+        const compressedPdfBytes = await pdfDoc.save({ useObjectStreams: true });
 
-        // 3. Upload ไป Vercel Blob (ใช้ชื่อไฟล์ภาษาอังกฤษเพื่อความปลอดภัย)
-        const blob = await put(`pdf_${messageId}.pdf`, Buffer.from(compressedPdfBytes), {
+        // 4. Upload ไป Vercel Blob (ใช้ชื่อภาษาอังกฤษเพื่อความเสถียรของ URL)
+        const blob = await put(`out_${messageId}.pdf`, Buffer.from(compressedPdfBytes), {
           access: 'public',
           contentType: 'application/pdf',
           addRandomSuffix: false
         });
 
-        // 4. ตอบกลับด้วย Template (เสถียรกว่าการส่งไฟล์ตรงๆ)
-        await client.replyMessage(event.replyToken, [
-          {
-            type: 'template',
-            altText: 'บีบอัดไฟล์ PDF สำเร็จ!',
-            template: {
-              type: 'buttons',
-              title: 'บีบอัดสำเร็จ!',
-              text: `ไฟล์: ${originalFileName.substring(0, 40)}`,
-              actions: [
-                {
-                  type: 'uri',
-                  label: 'ดาวน์โหลดไฟล์ (PDF)',
-                  uri: blob.url
-                }
-              ]
-            }
-          }
-        ]);
+        // 5. ส่งไฟล์กลับ (ใช้ Push Message เพราะ Reply Token ถูกใช้ไปแล้ว)
+        await client.pushMessage(userId, {
+          type: 'file',
+          originalContentUrl: blob.url,
+          fileName: `Compressed_${originalFileName.replace(/[^\x00-\x7F]/g, "") || "file"}.pdf`, // ตัดตัวอักษรพิเศษในชื่อไฟล์ออกชั่วคราวเพื่อกัน Error
+          fileSize: compressedPdfBytes.length
+        });
+
+        // ส่งข้อความปิดท้าย
+        await client.pushMessage(userId, { type: 'text', text: 'บีบอัดไฟล์เสร็จเรียบร้อยครับ!' });
 
       } catch (error) {
-        console.error("API Error:", error.response ? JSON.stringify(error.response.data) : error.message);
-        // แจ้งเตือนข้อผิดพลาดกลับไป
-        await client.pushMessage(event.source.userId, {
-          type: 'text',
-          text: `เกิดข้อผิดพลาด: ${error.message}`
-        }).catch(() => {});
+        console.error("Error:", error.message);
+        await client.pushMessage(userId, { type: 'text', text: `เกิดข้อผิดพลาด: ${error.message}` });
       }
     }
   }
