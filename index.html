@@ -27,7 +27,7 @@
 
 <div class="container">
     <h2>🏥 ย่อไฟล์ PDF</h2>
-    <p style="font-size: 12px; color: red;">* ระบบจะถามที่บันทึกทีละไฟล์</p>
+    <p style="font-size: 12px; color: #666;">ไฟล์จะถูกบันทึกลงเครื่องโดยอัตโนมัติ</p>
     
     <div class="file-box" onclick="document.getElementById('pdfInput').click()">
         <span id="fileNameHint">เลือกไฟล์ PDF (เลือกได้หลายไฟล์)</span>
@@ -40,7 +40,7 @@
         <option value="0.8">คุณภาพสูง (ชัดเจน)</option>
     </select>
 
-    <button id="btnCompress">บีบอัดและเลือกที่เซฟ</button>
+    <button id="btnCompress">บีบอัดและดาวน์โหลดทันที</button>
     
     <div class="loader" id="loader"></div>
     <p id="status"></p>
@@ -51,35 +51,16 @@
 <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // ฟังก์ชันสำหรับ "Save As" โดยให้เลือกที่บันทึกได้
-    async function saveFileAs(blob, suggestedName) {
-        // ตรวจสอบว่า Browser รองรับ File System Access API หรือไม่ (Chrome/Edge/Desktop)
-        if ('showSaveFilePicker' in window) {
-            try {
-                const handle = await window.showSaveFilePicker({
-                    suggestedName: suggestedName,
-                    types: [{
-                        description: 'PDF Document',
-                        accept: {'application/pdf': ['.pdf']},
-                    }],
-                });
-                const writable = await handle.createWritable();
-                await writable.write(blob);
-                await writable.close();
-                return true;
-            } catch (err) {
-                console.log('User cancelled or error:', err);
-                return false;
-            }
-        } else {
-            // กรณี Browser ไม่รองรับ (เช่น LINE In-App หรือ Safari รุ่นเก่า) ให้โหลดแบบปกติ
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = suggestedName;
-            link.click();
-            return true;
-        }
+    // ฟังก์ชันสั่งดาวน์โหลดลงโฟลเดอร์เครื่องทันที
+    function autoDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     }
 
     const processSingleFile = (file, quality) => {
@@ -104,10 +85,9 @@
                 }
 
                 doc.end();
-                stream.on('finish', async () => {
+                stream.on('finish', () => {
                     const blob = stream.toBlob('application/pdf');
-                    // เรียกใช้ฟังก์ชันเลือกที่เซฟ
-                    await saveFileAs(blob, `Small_${file.name}`);
+                    autoDownload(blob, `Small_${file.name}`);
                     resolve();
                 });
             } catch (err) { reject(err); }
@@ -129,12 +109,13 @@
         try {
             const files = Array.from(fileInput.files);
             for (let i = 0; i < files.length; i++) {
-                status.innerText = `กำลังทำไฟล์ที่ ${i + 1} / ${files.length}\nกรุณาเลือกที่บันทึกไฟล์เมื่อหน้าต่างเด้งขึ้นมา`;
+                status.innerText = `กำลังทำไฟล์ที่ ${i + 1} / ${files.length}\nกรุณารอสักครู่...`;
                 await processSingleFile(files[i], quality);
             }
-            status.innerHTML = `<span style="color:var(--primary-color)">✅ เสร็จสิ้นทุกไฟล์!</span>`;
+            status.innerHTML = `<span style="color:var(--primary-color)">✅ ดาวน์โหลดสำเร็จทุกไฟล์!</span>`;
         } catch (error) {
             status.innerHTML = `<span style="color:red">❌ เกิดข้อผิดพลาด</span>`;
+            console.error(error);
         } finally {
             btn.disabled = false;
             loader.style.display = "none";
