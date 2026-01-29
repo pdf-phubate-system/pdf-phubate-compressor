@@ -14,11 +14,14 @@
         :root { --primary-color: #00b900; }
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; padding: 20px; display: flex; justify-content: center; }
         .container { background: white; width: 100%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
-        .file-box { border: 2px dashed #ccc; padding: 20px; border-radius: 10px; margin-bottom: 20px; cursor: pointer; }
+        .file-box { border: 2px dashed #ccc; padding: 20px; border-radius: 10px; margin-bottom: 20px; cursor: pointer; transition: 0.3s; }
+        .file-box:hover { border-color: var(--primary-color); background: #f9fff9; }
         select, button { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd; font-size: 16px; margin-top: 10px; }
         button { background-color: var(--primary-color); color: white; border: none; font-weight: bold; cursor: pointer; }
         button:disabled { background-color: #ccc; }
         #status { margin-top: 15px; font-size: 13px; color: #666; white-space: pre-line; }
+        /* ส่วนที่เพิ่มใหม่: จัดการรายการไฟล์ */
+        #fileDisplayName { margin-top: 10px; font-size: 14px; color: var(--primary-color); font-weight: bold; text-align: left; max-height: 80px; overflow-y: auto; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -27,17 +30,18 @@
 
 <div class="container">
     <h2>🏥 ย่อไฟล์ PDF</h2>
-    <p style="font-size: 12px; color: #666;">ไฟล์จะถูกบันทึกลงเครื่องโดยอัตโนมัติ</p>
     
     <div class="file-box" onclick="document.getElementById('pdfInput').click()">
-        <span id="fileNameHint">เลือกไฟล์ PDF (เลือกได้หลายไฟล์)</span>
+        <span id="fileNameHint">คลิกเพื่อเลือกไฟล์ PDF (เลือกได้หลายไฟล์)</span>
         <input type="file" id="pdfInput" accept=".pdf" multiple style="display:none">
+        <div id="fileDisplayName"></div>
     </div>
 
+    <label style="font-size: 13px; color: #888; display: block; text-align: left;">ระดับความชัดเจน</label>
     <select id="quality">
-        <option value="0.3">คุณภาพต่ำ (ไฟล์เล็กสุด)</option>
-        <option value="0.5" selected>คุณภาพปานกลาง (แนะนำ)</option>
-        <option value="0.8">คุณภาพสูง (ชัดเจน)</option>
+        <option value="0.3">เล็กมาก (เน้นประหยัดพื้นที่)</option>
+        <option value="0.5" selected>ปานกลาง (แนะนำ)</option>
+        <option value="0.8">ชัดมาก (ไฟล์ใหญ่กว่า)</option>
     </select>
 
     <button id="btnCompress">บีบอัดและดาวน์โหลดทันที</button>
@@ -51,7 +55,20 @@
 <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // ฟังก์ชันสั่งดาวน์โหลดลงโฟลเดอร์เครื่องทันที
+    // ส่วนที่แก้ไข: เมื่อเลือกไฟล์ ให้แสดงชื่อไฟล์ทันที
+    document.getElementById('pdfInput').onchange = function() {
+        const files = this.files;
+        const display = document.getElementById('fileDisplayName');
+        if (files.length > 0) {
+            let names = Array.from(files).map(f => "• " + f.name).join("<br>");
+            display.innerHTML = `<div style="margin-bottom:5px">เลือกแล้ว ${files.length} ไฟล์:</div>` + names;
+            document.getElementById('fileNameHint').innerText = "เปลี่ยนการเลือกไฟล์";
+        } else {
+            display.innerHTML = "";
+            document.getElementById('fileNameHint').innerText = "คลิกเพื่อเลือกไฟล์ PDF (เลือกได้หลายไฟล์)";
+        }
+    };
+
     function autoDownload(blob, filename) {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -109,12 +126,12 @@
         try {
             const files = Array.from(fileInput.files);
             for (let i = 0; i < files.length; i++) {
-                status.innerText = `กำลังทำไฟล์ที่ ${i + 1} / ${files.length}\nกรุณารอสักครู่...`;
+                status.innerText = `🔄 กำลังทำไฟล์ที่ ${i + 1} จาก ${files.length}\n[ ${files[i].name} ]`;
                 await processSingleFile(files[i], quality);
             }
-            status.innerHTML = `<span style="color:var(--primary-color)">✅ ดาวน์โหลดสำเร็จทุกไฟล์!</span>`;
+            status.innerHTML = `<span style="color:var(--primary-color)">✅ บีบอัดและดาวน์โหลดเรียบร้อย!</span>`;
         } catch (error) {
-            status.innerHTML = `<span style="color:red">❌ เกิดข้อผิดพลาด</span>`;
+            status.innerHTML = `<span style="color:red">❌ เกิดข้อผิดพลาดในการประมวลผล</span>`;
             console.error(error);
         } finally {
             btn.disabled = false;
