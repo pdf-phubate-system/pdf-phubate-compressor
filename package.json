@@ -1,8 +1,8 @@
 {
   "dependencies": {
     "@line/bot-sdk": "^9.4.1",
-    "pdf-lib": "^1.17.1",
     "@vercel/blob": "^0.23.4",
-    "axios": "^1.6.8"
+    "axios": "^1.6.8",
+    "form-data": "^4.0.0"
   }
 }
