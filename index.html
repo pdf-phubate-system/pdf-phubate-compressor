@@ -19,11 +19,12 @@
         select, button { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd; font-size: 16px; margin-top: 10px; }
         button { background-color: var(--primary-color); color: white; border: none; font-weight: bold; cursor: pointer; }
         button:disabled { background-color: #ccc; }
-        #status { margin-top: 15px; font-size: 13px; color: #666; white-space: pre-line; }
-        /* ส่วนที่เพิ่มใหม่: จัดการรายการไฟล์ */
+        #status { margin-top: 15px; font-size: 13px; color: #666; white-space: pre-line; line-height: 1.6; }
         #fileDisplayName { margin-top: 10px; font-size: 14px; color: var(--primary-color); font-weight: bold; text-align: left; max-height: 80px; overflow-y: auto; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* สไตล์สำหรับเน้นตัวเลขหน้า */
+        .page-count { color: #008b00; font-weight: bold; font-size: 1.1em; }
     </style>
 </head>
 <body>
@@ -47,7 +48,7 @@
     <button id="btnCompress">บีบอัดและดาวน์โหลดทันที</button>
     
     <div class="loader" id="loader"></div>
-    <p id="status"></p>
+    <div id="status"></div>
 
     <canvas id="tempCanvas" style="display:none;"></canvas>
 </div>
@@ -55,7 +56,6 @@
 <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // ส่วนที่แก้ไข: เมื่อเลือกไฟล์ ให้แสดงชื่อไฟล์ทันที
     document.getElementById('pdfInput').onchange = function() {
         const files = this.files;
         const display = document.getElementById('fileDisplayName');
@@ -80,7 +80,8 @@
         URL.revokeObjectURL(url);
     }
 
-    const processSingleFile = (file, quality) => {
+    // ปรับฟังก์ชันให้รับ status element เข้ามาอัปเดตตัวเลขหน้า
+    const processSingleFile = (file, quality, fileIndex, totalFiles, statusElement) => {
         return new Promise(async (resolve, reject) => {
             try {
                 const arrayBuffer = await file.arrayBuffer();
@@ -91,6 +92,9 @@
                 const ctx = canvas.getContext('2d');
 
                 for (let i = 1; i <= pdf.numPages; i++) {
+                    // แสดงความคืบหน้าของหน้าเอกสารแบบ Real-time
+                    statusElement.innerHTML = `📄 ไฟล์ที่ ${fileIndex}/${totalFiles}: <br><b>${file.name}</b><br><br>⏳ กำลังบีบอัดหน้า <span class="page-count">${i}</span> จากทั้งหมด ${pdf.numPages} หน้า`;
+                    
                     const page = await pdf.getPage(i);
                     const viewport = page.getViewport({ scale: 1.5 });
                     canvas.height = viewport.height;
@@ -126,10 +130,10 @@
         try {
             const files = Array.from(fileInput.files);
             for (let i = 0; i < files.length; i++) {
-                status.innerText = `🔄 กำลังทำไฟล์ที่ ${i + 1} จาก ${files.length}\n[ ${files[i].name} ]`;
-                await processSingleFile(files[i], quality);
+                // ส่ง parameter เพิ่มเติมเพื่อไปอัปเดตหน้าจอ
+                await processSingleFile(files[i], quality, i + 1, files.length, status);
             }
-            status.innerHTML = `<span style="color:var(--primary-color)">✅ บีบอัดและดาวน์โหลดเรียบร้อย!</span>`;
+            status.innerHTML = `<span style="color:var(--primary-color); font-weight:bold;">✅ บีบอัดและดาวน์โหลดเรียบร้อยทั้ง ${files.length} ไฟล์!</span>`;
         } catch (error) {
             status.innerHTML = `<span style="color:red">❌ เกิดข้อผิดพลาดในการประมวลผล</span>`;
             console.error(error);
