@@ -11,33 +11,35 @@ module.exports = async (req, res) => {
       const { id: messageId, fileName: originalFileName } = event.message;
       const replyToken = event.replyToken;
 
+      // กรองเฉพาะไฟล์ PDF
       if (!originalFileName.toLowerCase().endsWith('.pdf')) continue;
 
       try {
-        // 1. แสดง Loading ทันที (ใช้ axios ยิงตรง ไม่ผ่าน SDK)
+        // 1. แสดง Loading Animation ทันที (ยิง API ตรง)
         await axios.post('https://api.line.me/v2/bot/chat/loading/start', 
           { chatId: event.source.userId, loadingSeconds: 30 },
           { headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` } }
         ).catch(() => {});
 
-        // 2. ดึงไฟล์ PDF จาก LINE
+        // 2. ดึงไฟล์จาก LINE
         const response = await axios.get(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
           headers: { 'Authorization': `Bearer ${process.env.CHANNEL_ACCESS_TOKEN}` },
           responseType: 'arraybuffer' 
         });
 
-        // 3. บีบอัดไฟล์
+        // 3. บีบอัดไฟล์ PDF
         const pdfDoc = await PDFDocument.load(response.data);
         const compressedBytes = await pdfDoc.save({ useObjectStreams: true });
+        const finalBuffer = Buffer.from(compressedBytes);
 
-        // 4. ฝากไฟล์ที่ Vercel Blob (ใช้ชื่อสั้นๆ ป้องกัน URL พัง)
-        const blob = await put(`f_${Date.now()}.pdf`, Buffer.from(compressedBytes), {
+        // 4. Upload ไป Vercel Blob (ใช้ชื่อสั้นๆ เพื่อให้ URL ปลอดภัย)
+        const blob = await put(`comp_${Date.now()}.pdf`, finalBuffer, {
           access: 'public',
           contentType: 'application/pdf',
         });
 
-        // 5. ส่งไฟล์กลับ (หัวใจสำคัญ: ไม่ใส่ fileSize และใช้ชื่อไฟล์ที่ Clean แล้ว)
-        // การยิง JSON ตรงแบบนี้จะเสถียรกว่าการใช้ SDK ในบางกรณีครับ
+        // 5. ส่งไฟล์กลับแบบดิบ (Raw JSON) - ไม่ใส่ fileSize และล้างชื่อไฟล์ให้สะอาด
+        // วิธีนี้จะลดโอกาสเกิด Error 400 ได้ดีที่สุด
         await axios.post('https://api.line.me/v2/bot/message/reply', {
           replyToken: replyToken,
           messages: [{
@@ -53,7 +55,8 @@ module.exports = async (req, res) => {
         });
 
       } catch (error) {
-        console.error("Final Attempt Error:", error.response ? error.response.data : error.message);
+        // บันทึก Log กรณีเกิดข้อผิดพลาดเพื่อดูสาเหตุที่แท้จริง
+        console.error("API Error Response:", error.response ? JSON.stringify(error.response.data) : error.message);
       }
     }
   }
